@@ -1,2 +1,2 @@
-# simple_js_chess_game
+# Simple Pure ES6 chess game
 Pure ES6 chess game
