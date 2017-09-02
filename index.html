@@ -1,13 +1,34 @@
 <html>
 <head>
 	<style>
+		body {
+			font-family: Arial;
+			font-size: 1em;
+		}
 		.case {
-			width:50px;
-			height:50px;
-			border:0.5px solid black;
+			width:45px;
+			height:45px;
+			border:0.5px solid grey;
 			float:left;
 			text-align: center;
-			font-size: 2em;
+			font-size: 2.2em;
+		}
+		.case-name {
+			float:left;
+			text-align: center;
+			width:15px;
+			height:45px;
+			line-height: 45px;
+		}
+		.case-name-letter {
+			width:45px;
+			float:left;
+			text-align: center;
+			margin-left:15px;
+			border:0.5px solid white;
+		}
+		.case-name-letter ~ .case-name-letter {
+			margin-left:0px
 		}
 		.piece {
 			width: 100%;
@@ -17,33 +38,283 @@
 			background-color:white;
 		}
 		.black {
-			background-color:lightslategray;
+			background-color:lightsteelblue;
 		}
 		.selected {
-			background-color: yellow;
+			background-color: lightgreen;
 		}
 		.highlighted {
 			background-color: lightgreen;
 		}
-		#moves {
+		#board {
 			float: left
 		}
+		#moves {
+			float: left;
+		}
 	</style>
+	<link rel="stylesheet" href="https://unpkg.com/purecss@1.0.0/build/pure-min.css" integrity="sha384-nn4HPE8lTHyVtfCBi5yW9d20FjT8BJwUXyWZT9InLYax14RDjBj46LmSztkmNP9w" crossorigin="anonymous">
+	<link rel="script" href="https://cdnjs.cloudflare.com/ajax/libs/immutable/3.8.1/immutable.min.js"/>
 </head>
 <body>
-	Chess Game
 	<div id="board"></div>
 	<div id="moves"></div>
 	<script type="text/javascript">
-	
-		let selectedSquare
-		let pieceCounter = 0
-		let chessBoard = []
-		let moves = []
-		
+		// CONSTANTS
+		const ANIMATION_DURATION = 200
 		const COLOR = {
-			BLACK:"BLACK",
-			WHITE:"WHITE"
+			BLACK:{name: "BLACK", fenNotation: "b"},
+			WHITE:{name: "WHITE", fenNotation: "w"}
+		}
+		const PIECE = {
+			PAWN:{name:"PAWN",notation:"", fenNotationWhite: "P", fenNotationBlack: "p"},
+			ROOK:{name:"ROOK",notation:"R", fenNotationWhite: "R", fenNotationBlack: "r"},
+			KNIGHT:{name:"KNIGHT",notation:"N", fenNotationWhite: "N", fenNotationBlack: "n"},
+			BISHOP:{name:"BISHOP",notation:"B", fenNotationWhite: "B", fenNotationBlack: "b"},
+			QUEEN:{name:"QUEEN",notation:"Q", fenNotationWhite: "Q", fenNotationBlack: "q"},
+			KING:{name:"KING",notation:"K", fenNotationWhite: "K", fenNotationBlack: "k"},
+		}
+		const CASTLE = {
+			KING_SIDE: {name: "KING", fenNotationWhite: "K", fenNotationBlack: "k"},
+			QUEEN_SIDE: {name: "QUEEN", fenNotationWhite: "Q", fenNotationBlack: "q"}
+		}
+		// gloval game variables
+		let PIECE_ID_COUNTER = 0 // for defining piece id
+		let MOVE_COUNTER = 0 // for defining move id
+
+		class Chessboard {
+			constructor(gameSession, grid) {
+				this.game = gameSession;
+				this.chessboard = grid; // the square grid =[][]
+				this.currentSquare;
+				this.whiteCastled;
+				this.blackCastled;
+				this.whiteCastlingAvailability = [CASTLE.KING_SIDE, CASTLE.QUEEN_SIDE]
+				this.blackCastlingAvailability = [CASTLE.KING_SIDE, CASTLE.QUEEN_SIDE]
+			}
+
+			loadFenNotation(fenString) {
+				const fenParts = fenString.split(" ")
+				const board = fenParts[0]
+				const activeColor = fenParts[1]
+				const castlingStatus = fenParts[2]
+				const enPassantTargetSquare = fenParts[3]
+				const halfmoveClock = fenParts[4]
+				const fullmoveNumber = fenParts[5]
+
+				const self = this
+				let i = 0,j = 0
+
+				const getPieceFromNotation = (notation) => {
+					for (piece in Object.keys(PIECE)) {
+						if (piece.fenNotationWhite == notation) return {piece, color:COLOR.WHITE}
+						if (piece.fenNotationBlack == notation) return {piece, color:COLOR.BLACK}
+					}
+					throw new Exception(`unable to identify piece from notation ${notation}`)
+				}
+				const loadNotationElement = (char) => {
+					if (Number.isInteger(char)) {
+
+					} else {
+						let piece = getPieceFromNotation(char)
+						self.addPiece(i, j, new PieceBuilder(piece.piece, piece.color))
+					}
+				}
+				board.split("/").map(
+					line => {
+						j = 0
+						line.split("").map(char => loadNotationElement(char))
+						++i
+					}
+				)
+
+			}
+			getFenNotation() {
+				// attention sens échiquier, par défaut vu des blancs
+				let fen = ""
+				this.chessboard.map(
+					(row ,i)=> {
+						row.map (
+							square => fen += square.getFenNotation()
+						)
+						if (i < 7) fen += "/"
+					}
+				)
+				let board = fen.split("/").map(
+					line => 
+						//console.log(line.match(/(\*)+/))
+						line.replace(/([a-z]*)(\*+)([a-z]*)/gi, (match, p1, p2, p3, offset, s) => 
+							//console.log("match " + [p1, p2.split("").length, p3].join(' - '))
+							[p1, p2.split("").length, p3].join('') 
+						)
+				).join('/')
+				const activeColor = () => this.game.nextTurnColor.fenNotation
+				const castlingStatus = () => {
+					if (this.whiteCastled && this.blackCastled) return "-"
+					return (!this.whiteCastled ? this.whiteCastlingAvailability.map(castle => castle.fenNotationWhite).join("") : "") + (!this.blackCastled ? this.blackCastlingAvailability.map(castle => castle.fenNotationBlack).join("") : "")
+				}
+				const enPassantTargetSquare = () => "-"
+				const halfmoveClock = () => this.game.halfmoveClock
+				const fullmoveNumber = () => this.game.turn
+				return `${board} ${activeColor()} ${castlingStatus()} ${enPassantTargetSquare()} ${halfmoveClock()} ${fullmoveNumber()}`
+			}
+			neighbour(i, j, dx, dy) {
+				const newI = i + dx
+				const newJ = j + dy
+				if ((newI < 0 || newI > 7) || (newJ < 0 || newJ > 7)) return null
+				return this.chessboard[newI][newJ]
+			}
+			get(i, j) {
+				if ((i < 0 || i > 7) || (j < 0 || j > 7)) return null
+				return this.chessboard[i][j]
+			}
+			addPiece(i, j, piece) {
+				this.get(i, j).setPiece(piece)
+			}
+			clearSelectedSquares() {
+				this.currentSquare = null
+				this.chessboard.map(row => row.map(square => {
+						square.selected = false
+						square.highlighted = false
+					}
+				))
+			}
+			
+			drawBoard() {
+				let html = ""
+				for (var i = 0; i < 8; i++) {
+					html += `<div class='case-name'>${8-i}</div>`
+					for (var j = 0; j < 8; j++) {
+						let square = this.get(i, j)
+						html += square.getHTML()
+					}
+					html += "<br style='clear:both;'>";
+				}
+				// draw column letter
+				for (var j = 0; j < 8; j++) {
+					html += `<div class='case-name-letter'>${String.fromCharCode(j+97)}</div>` 
+				}
+								
+				let board = document.getElementById("board")
+				board.innerHTML = html
+				this.addSquaresClickEventListener()
+				this.addPiecesClickEventListener()
+
+				// debug
+				console.log(this.getFenNotation())
+			}
+			addSquaresClickEventListener() {
+				for (var i = 0; i < 8; i++) {
+					for (var j = 0; j < 8; j++) {
+						this.addSquareClickEventListener(document.getElementById("c-"+i+"-"+j))	
+					}
+				}
+			}
+			
+			addSquareClickEventListener(square) {
+				let self = this
+				// click on square
+				square.addEventListener('click', function(e) {
+					e.preventDefault();
+					let div = e.target
+					self.clickSquareEvent(div)
+				}, false);
+			}
+			
+			addPiecesClickEventListener() {
+				let pieces = document.querySelectorAll("div[id^='piece']")
+				let self = this
+				pieces.forEach( piece => {
+					piece.addEventListener('click', function(e) {
+						e.preventDefault();
+						self.clickSquareEvent(e.target.parentElement)
+					}, false);
+				})
+			}
+			
+			clickSquareEvent(squareElement) {
+				let i = squareElement.getAttribute("data-i")
+				let j = squareElement.getAttribute("data-j")
+				if (!i || !j) return
+				let newSquare = this.get(i, j)
+				if (!newSquare) return
+				
+				if (!this.currentSquare && !newSquare.piece) return 
+
+				// new piece selected
+				if (!this.currentSquare && newSquare.piece) {
+					return this.game.canPlayPiece(newSquare.piece) && this.selectNewSquare(newSquare)
+				}
+				
+				// move a piece
+				if (this.currentSquare && this.currentSquare.piece && newSquare && this.currentSquare != newSquare) {
+					
+					if (this.canMovePiece(this.currentSquare.piece, newSquare)) {
+						this.movePiece(this.currentSquare, newSquare)
+					} else {
+						if (newSquare.piece && this.game.canPlayPiece(newSquare.piece)) { // if because you select another piece
+							return this.selectNewSquare(newSquare)
+						}
+					}
+					let self = this
+					setTimeout(function () {
+						self.clearSelectedSquares()
+						self.drawBoard();
+					}, ANIMATION_DURATION);
+				}
+			}
+			
+			lightPossibleMoves(piece) {
+				piece.getPossibleMoves(this).filter(s => s != null).map( s => s.highlighted = true)
+			}
+
+			selectNewSquare(newSquare) {
+				this.clearSelectedSquares()
+				this.lightPossibleMoves(newSquare.piece)
+				this.currentSquare = newSquare
+				this.currentSquare.selected = true
+				this.drawBoard()
+			}
+
+			canMovePiece(piece, newSquare) {
+				return piece.getPossibleMoves(this).includes(newSquare)
+			}
+
+			movePiece(oldSquare, newSquare) {
+				let piece = oldSquare.piece
+				this.game.addMove(piece, oldSquare, newSquare)
+				newSquare.setPiece(piece)
+				piece.afterMoveEvent()
+				Chessboard.startPieceAnimation(oldSquare, newSquare)
+				oldSquare.piece = null
+			}
+			
+			static getHtmlElementCoords(elem) {
+				let box = elem.getBoundingClientRect();
+				return {
+					top: box.top + pageYOffset,
+					left: box.left + pageXOffset
+				};
+			}
+
+			static startPieceAnimation(oldSquare, newSquare) {
+				let oldSquareCoord = Chessboard.getHtmlElementCoords(document.getElementById(oldSquare.getHtmlId()))
+				let newSquareCoord = Chessboard.getHtmlElementCoords(document.getElementById(newSquare.getHtmlId()))
+				console.log(`from ${oldSquareCoord.top},${oldSquareCoord.left} to -> ${newSquareCoord.top},${newSquareCoord.left}`)
+				let dx = Math.round(newSquareCoord.left - oldSquareCoord.left)
+				let dy = Math.round(newSquareCoord.top - oldSquareCoord.top)
+				
+				document.getElementById(oldSquare.piece.getHtmlId()).animate(
+				[
+					{ transform: `translate(0px, 0px)` },
+					{ transform: `translate(${dx}px, ${dy}px)` },
+					
+				], {
+					duration: ANIMATION_DURATION,
+					fill: "forwards"
+					}
+				);
+			}
 		}
 
 		class Square {
@@ -56,74 +327,68 @@
 				this.highlighted = highlighted
 			}
 			getHTML() {
-				return "<div class='case "+this.color+" "+(this.selected ? "selected":"")+" "+ (this.highlighted ? "highlighted" : "") +"' id='"+this.getHtmlId()+"' data-i='"+this.i+"' data-j='"+this.j+"' >"
-				+(this.piece ? this.piece.getHTML() : "")+
-				"</div>"
+				return `<div 
+				class='case ${this.color} ${(this.selected ? "selected":"")} ${(this.highlighted ? "highlighted" : "")}'
+				id='${this.getHtmlId()}' data-i='${this.i}' data-j='${this.j}'>
+				${(this.piece ? this.piece.getHTML() : "")}
+				</div>`
 			}
 			setPiece(piece) {
 				this.piece = piece;
-				if (piece) piece.square = this;
+				if (piece) {
+					piece.i = this.i;
+					piece.j = this.j;
+				}
 			}
 			getHtmlId() {
 				return `c-${this.i}-${this.j}`
 			}
+			getFenNotation() {
+				return this.piece ? (this.piece.color == COLOR.WHITE ? this.piece.name.fenNotationWhite : this.piece.name.fenNotationBlack) : "*"
+			}
 		}
 		
-		class Move {
-			constructor(piece, initialSquare, newSquare) {
-				this.piece = piece
-				this.initialSquare = initialSquare
-				this.newSquare = newSquare
-			}
-			getString() {
-				return `Piece ${this.piece.name} moved from ${this.initialSquare.i},${this.initialSquare.j} to ${this.newSquare.i},${this.newSquare.j}`
-			}
-		}
-
 		class Piece {
-			constructor(name, color, square) {
+			constructor(name, color) {
 				this.name = name;
 				this.color = color;
-				this.square = square;
-				this.ID = pieceCounter++;
+				this.ID = ++PIECE_ID_COUNTER;
+				this.i;
+				this.j;
 			}
 			getHTML() {
 				return "<div class='piece' id='"+this.getHtmlId()+"'>"+this.getSymbol()+"</div>"
 			}
-			beforeMoveEvent(newSquare) {
-				moves.push(new Move(this, this.square, newSquare))
-			}
 			afterMoveEvent() {
-				console.log(`Piece ${this.name} moved to ${this.square.i},${this.square.j}`)
 			}
 			getHtmlId() {
 				return `piece-${this.ID}`
 			}
 		}
 		
+
 		class Pawn extends Piece {
 			constructor(color) {
-				super ('pawn', color)
+				super (PIECE.PAWN, color)
 				this.isAtInitialSquare = true
 			}
-			getPossibleMoves() {
+			getPossibleMoves(chessboard) {
 				let moves = []
 				let di = this.color == COLOR.BLACK ? 1 : -1
-				let ahead = neighbour(this.square, di, 0)
+				let ahead = chessboard.neighbour(this.i, this.j, di, 0)
 				if (ahead && !ahead.piece) moves.push(ahead)
 				
 				if (this.isAtInitialSquare) {
-					let aheadTwice = neighbour(this.square, di*2, 0)
+					let aheadTwice = chessboard.neighbour(this.i, this.j, di*2, 0)
 					if (aheadTwice && !aheadTwice.piece) moves.push(aheadTwice)		
 				}
 
-				let aheadLeft = neighbour(this.square, di, -1)
+				let aheadLeft = chessboard.neighbour(this.i, this.j, di, -1)
 				if (aheadLeft && aheadLeft.piece && aheadLeft.piece.color != this.color) moves.push(aheadLeft)
 				
-				let aheadRight = neighbour(this.square, di, 1)
+				let aheadRight = chessboard.neighbour(this.i, this.j, di, 1)
 				if (aheadRight && aheadRight.piece && aheadRight.piece.color != this.color) moves.push(aheadRight)
 				
-				//console.log(moves)
 				return moves
 			}
 			getSymbol() {
@@ -136,30 +401,28 @@
 
 		class Knight extends Piece {
 			constructor(color) {
-				super('knight', color) 
+				super(PIECE.KNIGHT, color) 
 			}
-			getPossibleMoves() {
+			getPossibleMoves(chessboard) {
 				let moves = []
 				const predicate = (square) => (square && !square.piece) || (square && square.piece && square.piece.color != this.color)
 
-				this.addMove(moves, neighbour(this.square, -1, -2), predicate)
-				this.addMove(moves, neighbour(this.square, -1, 2), predicate)
+				this.addMove(moves, chessboard.neighbour(this.i, this.j, -1, -2), predicate)
+				this.addMove(moves, chessboard.neighbour(this.i, this.j, -1, 2), predicate)
 				
-				this.addMove(moves, neighbour(this.square, -2, -1), predicate)
-				this.addMove(moves, neighbour(this.square, -2, 1), predicate)
+				this.addMove(moves, chessboard.neighbour(this.i, this.j, -2, -1), predicate)
+				this.addMove(moves, chessboard.neighbour(this.i, this.j, -2, 1), predicate)
 				
-				this.addMove(moves, neighbour(this.square, 1, -2), predicate)
-				this.addMove(moves, neighbour(this.square, 1, 2), predicate)
+				this.addMove(moves, chessboard.neighbour(this.i, this.j, 1, -2), predicate)
+				this.addMove(moves, chessboard.neighbour(this.i, this.j, 1, 2), predicate)
 				
-				this.addMove(moves, neighbour(this.square, 2, -1), predicate)
-				this.addMove(moves, neighbour(this.square, 2, 1), predicate)
+				this.addMove(moves, chessboard.neighbour(this.i, this.j, 2, -1), predicate)
+				this.addMove(moves, chessboard.neighbour(this.i, this.j, 2, 1), predicate)
 				
-				//console.log(moves)
 				return moves
 			}
 			addMove(moves, square, predicate) {
-				if (predicate(square))
-					moves.push(square)
+				if (predicate(square)) moves.push(square)
 			}
 			getSymbol() {
 				return this.color != COLOR.BLACK ? "&#9816;" : "&#9822;"
@@ -168,41 +431,41 @@
 
 		class Rook extends Piece {
 			constructor(color) {
-				super('rook', color) 
+				super(PIECE.ROOK, color) 
 			}
 			getSymbol() {
 				return (this.color == COLOR.BLACK) ? "&#9820;" : "&#9814;"
 			}
-			getPossibleMoves() {
+			getPossibleMoves(chessboard) {
 				let moves = []	
 				const predicate = (square) => (square && !square.piece) || (square && square.piece && square.piece.color != this.color)
 
-				for (let i = this.square.i - 1; i >= 0; i--) {
-					let s = chessBoard[i][this.square.j]
+				for (let i = this.i - 1; i >= 0; i--) {
+					let s = chessboard.get(i, this.j)
 					if (predicate(s)) {
 						moves.push(s)
 						if (s.piece && s.piece.color != this.color) break
 					} else break
 				}
 
-				for (let i = this.square.i + 1; i < 8; i++) {
-					let s = chessBoard[i][this.square.j]
+				for (let i = this.i + 1; i < 8; i++) {
+					let s = chessboard.get(i, this.j)
 					if (predicate(s)) {
 						moves.push(s)
 						if (s.piece && s.piece.color != this.color) break
 					} else break
 				}
 
-				for (let j = this.square.j - 1; j >= 0; j--) {
-					let s = chessBoard[this.square.i][j]
+				for (let j = this.j - 1; j >= 0; j--) {
+					let s = chessboard.get(this.i, j)
 					if (predicate(s)) {
 						moves.push(s)
 						if (s.piece && s.piece.color != this.color) break
 					} else break
 				}
 
-				for (let j = this.square.j + 1; j < 8; j++) {
-					let s = chessBoard[this.square.i][j]
+				for (let j = this.j + 1; j < 8; j++) {
+					let s = chessboard.get(this.i, j)
 					if (predicate(s)) {
 						moves.push(s)
 						if (s.piece && s.piece.color != this.color) break
@@ -215,39 +478,39 @@
 		
 		class Bishop extends Piece {
 			constructor(color) {
-				super('bishop', color) 
+				super(PIECE.BISHOP, color) 
 			}
 			getSymbol() {
 				return (this.color == COLOR.BLACK) ? "&#9821;" : "&#9815;"	
 			}
-			getPossibleMoves() {
+			getPossibleMoves(chessboard) {
 				let moves = []
 				const predicate = (square) => (square && !square.piece) || (square && square.piece && square.piece.color != this.color)
 
-				for (let i = this.square.i+1, j = this.square.j+1; i < 8 && j < 8; i++,j++) {
-					let s = chessBoard[i][j]
+				for (let i = this.i+1, j = this.j+1; i < 8 && j < 8; i++,j++) {
+					let s = chessboard.get(i, j)
 					if (predicate(s)) {
 						moves.push(s)
 						if (s.piece && s.piece.color != this.color) break
 					} else break
 				}
-				for (let i = this.square.i-1, j = this.square.j+1; i >= 0 && j < 8; i--,j++) {
-					let s = chessBoard[i][j]
+				for (let i = this.i-1, j = this.j+1; i >= 0 && j < 8; i--,j++) {
+					let s = chessboard.get(i, j)
 					if (predicate(s)) {
 						moves.push(s)
 						if (s.piece && s.piece.color != this.color) break
 					} else break
 				}
 
-				for (let i = this.square.i+1, j = this.square.j-1; i < 8 && j >= 0; i++,j--) {
-					let s = chessBoard[i][j]
+				for (let i = this.i+1, j = this.j-1; i < 8 && j >= 0; i++,j--) {
+					let s = chessboard.get(i, j)
 					if (predicate(s)) {
 						moves.push(s)
 						if (s.piece && s.piece.color != this.color) break
 					} else break
 				}
-				for (let i = this.square.i-1, j = this.square.j-1; i >= 0 && j >= 0; i--,j--) {
-					let s = chessBoard[i][j]
+				for (let i = this.i-1, j = this.j-1; i >= 0 && j >= 0; i--,j--) {
+					let s = chessboard.get(i, j)
 					if (predicate(s)) {
 						moves.push(s)
 						if (s.piece && s.piece.color != this.color) break
@@ -259,27 +522,30 @@
 
 		class Queen extends Piece {
 			constructor(color) {
-				super('queen', color) 
+				super(PIECE.QUEEN, color) 
 			}
 			getSymbol() {
 				return (this.color == COLOR.BLACK) ? "&#9819;" : "&#9813;"	
 			}
-			getPossibleMoves() {
-				let queenSquare = this.square
-				let bishop = new Bishop(this.color); bishop.square = queenSquare
-				let rook = new Rook(this.color); rook.square = queenSquare
-				return bishop.getPossibleMoves().concat(rook.getPossibleMoves())
+			getPossibleMoves(chessboard) {
+				let bishop = new Bishop(this.color); 
+				bishop.i = this.i // TODO,bof
+				bishop.j = this.j // TODO,bof
+				let rook = new Rook(this.color); 
+				rook.i = this.i
+				rook.j = this.j
+				return bishop.getPossibleMoves(chessboard).concat(rook.getPossibleMoves(chessboard))
 			}
 		}
 
 		class King extends Piece {
 			constructor(color) {
-				super('king', color) 
+				super(PIECE.KING, color) 
 			}
 			getSymbol() {
 				return (this.color == COLOR.BLACK) ? "&#9818;" : "&#9812;"	
 			}
-			getPossibleMoves() {
+			getPossibleMoves(chessboard) {
 				let moves = []
 				const predicate = (square) => (square && !square.piece) || (square && square.piece && square.piece.color != this.color)
 				let directions = [
@@ -290,7 +556,7 @@
 				const me = this
 				directions.forEach(d => {
 					let {di,dj} = d
-					let s = neighbour(me.square, di, dj)
+					let s = chessboard.neighbour(me.i, me.j, di, dj)
 					if (predicate(s)) {
 						moves.push(s)
 					}
@@ -299,182 +565,130 @@
 			}
 		}
 
-		function neighbour(square, dx, dy) {
-			const newI = square.i + dx
-			const newJ = square.j + dy
-			if ((newI < 0 || newI > 7) || (newJ < 0 || newJ > 7)) return null
-			return chessBoard[newI][newJ]
-		}
-		
-		function lightPossibleMoves(piece) {
-			piece.getPossibleMoves().filter(s => s != null).map( s => s.highlighted = true)
-		}
 
-		function clearSelectedSquares() {
-			selectedSquare = null
-			chessBoard.map(row => row.map(square => {
-					square.selected = false
-					square.highlighted = false
-				}
-			))
-		}
-		function canMovePiece(piece, newSquare) {
-			const canMove = piece.getPossibleMoves().includes(newSquare)
-			//console.log("can move = "+ canMove)
-			return canMove
-		}
-
-		function addSquareClickListener(square) {
-			// click on square
-			square.addEventListener('click', function(e) {
-				e.preventDefault();
-				let div = e.target
-				clickSquareEvent(div)
-			}, false);
-		}
-		
-		function addPieceClickListener() {
-			let pieces = document.querySelectorAll("div[id^='piece']")
-			
-			pieces.forEach( piece => {
-				piece.addEventListener('click', function(e) {
-					e.preventDefault();
-					clickSquareEvent(e.target.parentElement)
-				}, false);
-			})
-		}
-
-		function clickSquareEvent(squareElement) {
-			let i = squareElement.getAttribute("data-i")
-			let j = squareElement.getAttribute("data-j")
-			if (!i || !j) return
-			let newSquare = chessBoard[i][j]
-			if (!newSquare) return
-			
-			if (!selectedSquare && !newSquare.piece) return 
-
-			// new piece selected
-			if (!selectedSquare && newSquare.piece) {
-				return selectNewSquare(newSquare)
+		class Game {
+			constructor() {
+				this.chessboard = this.initBoard();
+				this.moves = [];
+				this.nextTurnColor = COLOR.WHITE;
+				this.turn = 1;
+				this.halfmoveClock = 0;
 			}
-			
-			// move a piece
-			if (selectedSquare && selectedSquare.piece && newSquare && selectedSquare != newSquare) {
-				
-				if (canMovePiece(selectedSquare.piece, newSquare)) {
-					selectedSquare.piece.beforeMoveEvent(newSquare)
-					newSquare.setPiece(selectedSquare.piece)
-					selectedSquare.piece.afterMoveEvent()
-					startPieceAnimation(selectedSquare, newSquare)
-					selectedSquare.piece = null
-				} else {
-					if (newSquare.piece) { // if because you select another piece
-						return selectNewSquare(newSquare)
+
+			start()  {
+				this.chessboard.drawBoard()
+			}
+
+			initBoard() {
+				let grid = []
+				for (var i = 0; i < 8; i++) {
+					grid.push([])
+					for (var j = 0; j < 8; j++) {
+						let square = new Square(i, j, (i+j)%2==0 ? 'white':'black')
+						grid[i].push(square)
 					}
 				}
-				setTimeout(function () {
-					clearSelectedSquares()
-					drawBoard();
-				}, 300);
+				let chessboard = new Chessboard(this, grid)
+				Game.addPieces(chessboard)
+				return chessboard
 			}
-		}
-
-		function getCoords(elem) {
-			let box = elem.getBoundingClientRect();
-
-			return {
-				top: box.top + pageYOffset,
-				left: box.left + pageXOffset
-			};
-		}
-
-		function startPieceAnimation(oldSquare, newSquare) {
-			let oldSquareCoord = getCoords(document.getElementById(oldSquare.getHtmlId()))
-			let newSquareCoord = getCoords(document.getElementById(newSquare.getHtmlId()))
-			console.log(`from ${oldSquareCoord.top},${oldSquareCoord.left} to -> ${newSquareCoord.top},${newSquareCoord.left}`)
-			let dx = Math.round(newSquareCoord.left - oldSquareCoord.left)
-			let dy = Math.round(newSquareCoord.top - oldSquareCoord.top)
 			
-			document.getElementById(oldSquare.piece.getHtmlId()).animate(
-			[
-				{ transform: `translate(0px, 0px)` },
-				{ transform: `translate(${dx}px, ${dy}px)` },
+			static addPieces(chessboard) {
+				// blacks
+				Array(8).fill().map((e,n) => chessboard.addPiece(1, n, new Pawn(COLOR.BLACK)))
+				chessboard.addPiece(0, 0, new Rook(COLOR.BLACK))
+				chessboard.addPiece(0, 1, new Knight(COLOR.BLACK))
+				chessboard.addPiece(0, 2, new Bishop(COLOR.BLACK))
+				chessboard.addPiece(0, 3, new Queen(COLOR.BLACK))
+				chessboard.addPiece(0, 4, new King(COLOR.BLACK))
+				chessboard.addPiece(0, 5, new Bishop(COLOR.BLACK))
+				chessboard.addPiece(0, 6, new Knight(COLOR.BLACK))
+				chessboard.addPiece(0, 7, new Rook(COLOR.BLACK))
+
+				// whites
+				Array(8).fill().map((e,n) => chessboard.addPiece(6, n, new Pawn(COLOR.WHITE)))	
+				chessboard.addPiece(7, 0, new Rook(COLOR.WHITE))
+				chessboard.addPiece(7, 1, new Knight(COLOR.WHITE))
+				chessboard.addPiece(7, 2, new Bishop(COLOR.WHITE))
+				chessboard.addPiece(7, 3, new Queen(COLOR.WHITE))
+				chessboard.addPiece(7, 4, new King(COLOR.WHITE))
+				chessboard.addPiece(7, 5, new Bishop(COLOR.WHITE))
+				chessboard.addPiece(7, 6, new Knight(COLOR.WHITE))
+				chessboard.addPiece(7, 7, new Rook(COLOR.WHITE))
+			}
+
+			addMove(piece, pieceOldSquare, pieceNewSquare) {
+				const pieceOldSquareValue = Object.assign({}, pieceOldSquare)
+				const pieceNewSquareValue = Object.assign({}, pieceNewSquare)
+				this.moves.push(new Move(this.turn, piece, pieceOldSquareValue, pieceNewSquareValue))
+				this.turn += this.nextTurnColor == COLOR.BLACK ? 1 : 0
+				this.nextTurnColor = (piece.color == COLOR.BLACK ? COLOR.WHITE : COLOR.BLACK)
+				this.drawMoveList()
+			}
+			
+			canPlayPiece(piece) {
+				return piece.color == this.nextTurnColor
+			}
+
+			drawMoveList() {
+				let html = "<table class='pure-table pure-table-horizontal'>"
+				var turns = this.moves.reduce(function(map, move) {
+					if (!map[move.turn_count]) map[move.turn_count] = []
+					map[move.turn_count].push(move);
+					return map;
+				}, {});
+				//console.log(turns)
+				let drawGameMoves = (moveList) => moveList.map( (move,i) => `<td><a href='#' class='move-ref' id="${move.ID}">${move.getString()}</a></td> `).reduce((string, m) => string += m, "")
+				Object.keys(turns).map( move => html += `<tr><td>${move}</td>${drawGameMoves(turns[move])}</tr>` )
 				
-			], {
-				duration: 300,
-				fill: "forwards"
+				let div = document.getElementById("moves")
+				div.innerHTML = html
+				Game.addMovesClickEventListener()
 			}
-			);
+			
+			static addMovesClickEventListener() {
+				let moveLinks = document.querySelectorAll("a[class^='move-ref']")
+				
+				moveLinks.forEach( m => {
+					m.addEventListener('click', function(e) {
+						e.preventDefault();
+						let link = e.target
+						initGameAtMove(link.getAttribute("id"))
+					}, false);
+				})
+			}
+
+			static initGameAtMove(moveId) {
+
+			}
 		}
 
-		function selectNewSquare(newSquare) {
-			clearSelectedSquares()
-			lightPossibleMoves(newSquare.piece)
-			selectedSquare = newSquare
-			selectedSquare.selected = true
-			drawBoard()
-		}
-
-		function drawBoard() {
-			let board = document.getElementById("board")
-			board.innerHTML = ""
-			
-			for (var i = 0; i < 8; i++) {
-				for (var j = 0; j < 8; j++) {
-					let square = chessBoard[i][j]
-					board.innerHTML += square.getHTML()
-				}
-				board.innerHTML += "<br style='clear:both;'>";
+		class Move {
+			constructor(turn_count, piece, initialSquare, newSquare) {
+				this.ID = MOVE_COUNTER++;
+				this.turn_count = turn_count
+				this.piece = piece
+				this.initialSquare = initialSquare
+				this.newSquare = newSquare
 			}
-			
-			
-			for (var i = 0; i < 8; i++) {
-				for (var j = 0; j < 8; j++) {
-					addSquareClickListener(document.getElementById("c-"+i+"-"+j))	
+			pieceMoveOrTakeNotation() {
+				if (this.newSquare.piece) {
+					return this.piece.name == PIECE.PAWN ? `${Move.getChessCoords(this.initialSquare.i,this.initialSquare.j)}x` : `${this.piece.getSymbol()}x`
 				}
+				return this.piece.name != PIECE.PAWN ? this.piece.getSymbol() : ""
 			}
-			
-			addPieceClickListener()
-
-			// draw moves history
-			let movesDiv = document.getElementById("moves")
-			movesDiv.innerHTML = "<ul>"
-			moves.forEach( move => movesDiv.innerHTML += `<li>${move.getString()}</li>`)
-			movesDiv.innerHTML += "<ul>"
+			getString() {
+				return `${this.pieceMoveOrTakeNotation()}${Move.getChessCoords(this.newSquare.i,this.newSquare.j)}`
+			}
+			// adapter au sens échiquier
+			static getChessCoords(i,j) {
+				return String.fromCharCode(j+97) + (8-i)
+			}
 		}
 		
-		function initBoard() {
-			for (var i = 0; i < 8; i++) {
-				chessBoard.push([])
-				for (var j = 0; j < 8; j++) {
-					let square = new Square(i, j, (i+j)%2==0 ? 'white':'black')
-					chessBoard[i].push(square)
-				}
-			}
-			addPieces();
-		}
-		
-		function addPiece(i = 0, j = 0, piece) {
-			chessBoard[i][j].setPiece(piece)
-		}
-		
-		function addPieces() {
-			// blacks
-			//Array(8).fill().map((e,n) => addPiece(1, n, new Pawn(COLOR.BLACK)))
-			addPiece(0, 0, new Rook(COLOR.BLACK))
-			addPiece(0, 1, new Knight(COLOR.BLACK))
-			addPiece(0, 2, new Bishop(COLOR.BLACK))
-			addPiece(0, 3, new Queen(COLOR.BLACK))
-			addPiece(0, 4, new King(COLOR.BLACK))
 
-			// whites
-			Array(8).fill().map((e,n) => addPiece(6, n, new Pawn(COLOR.WHITE)))
-			addPiece(7, 3, new Queen(COLOR.WHITE))
-			addPiece(7, 4, new King(COLOR.WHITE))
-		}
-
-		initBoard();
-		drawBoard();
+		let game = new Game()
+		game.start()
 	</script>
 </body
 </html>
